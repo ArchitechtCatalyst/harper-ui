@@ -1,46 +1,61 @@
-import { createClient } from "@/lib/supabase/middleware"
-import { i18nRouter } from "next-i18n-router"
+import { createServerClient, type CookieOptions } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
-import i18nConfig from "./i18nConfig"
 
-export async function middleware(request: NextRequest) {
-  const i18nResult = i18nRouter(request, i18nConfig)
-  if (i18nResult) return i18nResult
-
-  try {
-    const { supabase, response } = createClient(request)
-
-    const session = await supabase.auth.getSession()
-
-    const redirectToChat = session && request.nextUrl.pathname === "/"
-
-    if (redirectToChat) {
-      const { data: homeWorkspace, error } = await supabase
-        .from("workspaces")
-        .select("*")
-        .eq("user_id", session.data.session?.user.id)
-        .eq("is_home", true)
-        .single()
-
-      if (!homeWorkspace) {
-        throw new Error(error?.message)
-      }
-
-      return NextResponse.redirect(
-        new URL(`/${homeWorkspace.id}/chat`, request.url)
-      )
+export const createClient = (request: NextRequest) => {
+  // Create an unmodified response
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers
     }
+  })
 
-    return response
-  } catch (e) {
-    return NextResponse.next({
-      request: {
-        headers: request.headers
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return request.cookies.get(name)?.value
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          // If the cookie is updated, update the cookies for the request and response
+          request.cookies.set({
+            name,
+            value,
+            ...options
+          })
+          response = NextResponse.next({
+            request: {
+              headers: request.headers
+            }
+          })
+          response.cookies.set({
+            name,
+            value,
+            ...options
+          })
+        },
+        remove(name: string, options: CookieOptions) {
+          // If the cookie is removed, update the cookies for the request and response
+          request.cookies.set({
+            name,
+            value: "",
+            ...options
+          })
+          response = NextResponse.next({
+            request: {
+              headers: request.headers
+            }
+          })
+          response.cookies.set({
+            name,
+            value: "",
+            ...options
+          })
+        }
       }
-    })
-  }
-}
+    }
+  )
 
-export const config = {
-  matcher: "/((?!api|static|.*\\..*|_next|auth).*)"
+  return { supabase, response }
 }
